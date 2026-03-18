@@ -2,11 +2,7 @@
 
 A production-grade webhook ingestion and alerting service for Solana, built with Node.js, Express, TypeScript, PostgreSQL, and Redis (Bull Queue).
 
-## Features
-- **Helius Webhook Ingestion**: Scalable ingestion via a Redis-backed job queue.
-- **Background Processing**: Parses transactions, normalizes events to Postgres, and evaluates user-defined alert rules asynchronously.
-- **Alert Delivery**: Pushes matching events to an external queue for delayed email/Telegram processing.
-- **REST API**: Fully typed REST API with authentication and rate-limiting to manage Watched Addresses and Alert Rules.
+This service operates as a high-throughput ingestion pipeline designed to reliably receive, parse, and store massive spikes of Solana blockchain transactions via Helius webhooks. By leveraging distributed Redis queues, the application fully decouples the fast, CPU-bound extraction of on-chain data into PostgreSQL from the slower, I/O-bound delivery of alerting notifications. This robust architecture enables developers to programmatically register wallet addresses and evaluate custom alert rules in real-time, instantly pushing critical on-chain events to end users via Email and Telegram without ever blocking or comprising the core ingestion event loop.
 
 ## Architecture & Technology Choices
 - **Node.js & TypeScript**: Strongly-typed business logic and configuration (`zod`).
