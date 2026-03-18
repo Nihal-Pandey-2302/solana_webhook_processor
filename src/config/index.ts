@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import dotenv from 'dotenv';
-import pino from 'pino';
+import { logger } from './logger';
 
 // Load environment variables
 dotenv.config();
@@ -34,9 +34,4 @@ const envSchema = z.object({
 
 export const config = envSchema.parse(process.env);
 
-export const logger = pino({
-  level: config.NODE_ENV === 'development' ? 'debug' : 'info',
-  transport: config.NODE_ENV === 'development' ? {
-    target: 'pino-pretty'
-  } : undefined,
-});
+export { logger };

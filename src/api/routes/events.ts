@@ -1,10 +1,11 @@
+import { DatabaseError } from '../../types/errors';
 import { Router } from 'express';
 import { logger } from '../../config';
 import { getEventsQuery } from '../../db/queries/eventQueries';
 
 const router = Router();
 
-router.get('/', async (req, res) => {
+router.get('/', async (req, res, next) => {
   try {
     const address = req.query.address as string;
     const limit = parseInt((req.query.limit as string) || '50', 10);
@@ -16,8 +17,7 @@ router.get('/', async (req, res) => {
     const events = await getEventsQuery(address, limit);
     res.json(events);
   } catch (err) {
-    logger.error({ err }, 'Error fetching events');
-    res.status(500).json({ error: 'Internal server error' });
+    next(new DatabaseError('Internal server error'));
   }
 });
 

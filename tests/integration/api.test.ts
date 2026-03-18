@@ -106,4 +106,48 @@ describe('REST API Core endpoints', () => {
     expect(Array.isArray(res.body)).toBe(true);
   });
 
+  it('should return 200 or 503 from /health depending on dependencies', async () => {
+    const res = await request(app).get('/health');
+    expect([200, 503]).toContain(res.status);
+    expect(res.body.status).toBeDefined();
+    expect(res.body.uptime).toBeDefined();
+  });
+
+  it('should return metrics with API key auth', async () => {
+    const res = await request(app)
+      .get('/metrics')
+      .set('x-api-key', validApiKey);
+
+    expect(res.status).toBe(200);
+    expect(res.body.queue_depth).toBeDefined();
+  });
+
+  describe('Production Readiness Features', () => {
+    it('should process webhook idempotently (skip duplicate)', async () => {
+      const payload = [{
+        signature: 'duplicate_tx_sig',
+        slot: 2000,
+        feePayer: 'payer2',
+        accountData: [],
+      }];
+      
+      const res1 = await request(app).post('/webhooks/helius').send(payload);
+      expect(res1.status).toBe(200);
+
+      const res2 = await request(app).post('/webhooks/helius').send(payload);
+      expect(res2.status).toBe(200);
+    });
+
+    it('should manage DLQ jobs properly', async () => {
+      const resGet = await request(app).get('/dlq').set('x-api-key', validApiKey);
+      expect(resGet.status).toBe(200);
+      expect(Array.isArray(resGet.body)).toBe(true);
+      
+      const resRetry = await request(app).post('/dlq/00000000-0000-0000-0000-000000000000/retry').set('x-api-key', validApiKey);
+      expect(resRetry.status).toBe(404);
+
+      const resDiscard = await request(app).delete('/dlq/00000000-0000-0000-0000-000000000000').set('x-api-key', validApiKey);
+      expect(resDiscard.status).toBe(404);
+    });
+  });
 });

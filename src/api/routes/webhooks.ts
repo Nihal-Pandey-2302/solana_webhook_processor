@@ -1,10 +1,11 @@
+import { DatabaseError } from '../../types/errors';
 import { Router } from 'express';
 import { logger } from '../../config';
 import { webhookQueue } from '../../workers/queue';
 
 const router = Router();
 
-router.post('/helius', async (req, res) => {
+router.post('/helius', async (req, res, next) => {
   try {
     // Helius sends an Authorization header we can validate against a known string
     // This is different from the x-api-key we use for our REST API.
@@ -35,8 +36,7 @@ router.post('/helius', async (req, res) => {
 
     res.status(200).send('Webhook received and queued');
   } catch (err) {
-    logger.error({ err }, 'Error processing helius webhook');
-    res.status(500).json({ error: 'Internal server error' });
+    next(new DatabaseError('Internal server error'));
   }
 });
 

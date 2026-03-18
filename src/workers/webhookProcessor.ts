@@ -1,8 +1,9 @@
 import { webhookQueue, alertQueue } from './queue';
-import { logger } from '../config';
+import { logger } from '../config/logger';
 import { insertEvents } from '../db/queries/eventQueries';
 import { getRulesByAddresses } from '../db/queries/ruleQueries';
 import { WebhookEvent, AlertJobData } from '../types';
+import pool from '../db/index';
 
 webhookQueue.process('process-webhook', async (job) => {
   const { events } = job.data;
@@ -16,6 +17,24 @@ webhookQueue.process('process-webhook', async (job) => {
   // 1. Parse and extract
   for (const event of events) {
     const signature = event.signature || 'unknown';
+
+    // Idempotency check
+    try {
+      const dupRes = await pool.query(
+        'INSERT INTO processed_signatures (signature) VALUES ($1) ON CONFLICT DO NOTHING RETURNING *',
+        [signature]
+      );
+      if (dupRes.rowCount === 0 && signature !== 'unknown') {
+        logger.warn({ signature, action: 'duplicate_skipped' }, 'Duplicate webhook skipped');
+        await pool.query(
+          'INSERT INTO duplicate_skips (time_bucket, count) VALUES (date_trunc(\'hour\', NOW()), 1) ON CONFLICT (time_bucket) DO UPDATE SET count = duplicate_skips.count + 1'
+        );
+        continue;
+      }
+    } catch (dbErr) {
+      logger.error({ err: dbErr, signature }, 'Error checking idempotency table');
+    }
+
     const slot = event.slot || 0;
     const feePayer = event.feePayer || null;
     

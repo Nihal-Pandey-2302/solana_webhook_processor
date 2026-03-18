@@ -4,18 +4,26 @@ import { config, logger } from '../config';
 import { apiLimiter } from './middleware/rateLimit';
 import { requireAuth } from './middleware/auth';
 
+import { requestLogger } from './middleware/requestLogger';
+import { globalErrorHandler } from './middleware/errorHandler';
+
 import addressesRouter from './routes/addresses';
 import rulesRouter from './routes/rules';
 import eventsRouter from './routes/events';
 import webhooksRouter from './routes/webhooks';
+import healthRouter from './routes/health';
+import metricsRouter from './routes/metrics';
+import dlqRouter from './routes/dlq';
 
 const app = express();
 
 app.use(cors());
 app.use(express.json());
+app.use(requestLogger);
 
-// Public webhook route (it has its own token validation)
+// Public routes
 app.use('/webhooks', webhooksRouter);
+app.use('/health', healthRouter);
 
 // Apply rate limiting and auth to all REST endpoints
 app.use(apiLimiter);
@@ -24,12 +32,11 @@ app.use(requireAuth);
 app.use('/addresses', addressesRouter);
 app.use('/addresses/:id/rules', rulesRouter);
 app.use('/events', eventsRouter);
+app.use('/metrics', metricsRouter);
+app.use('/dlq', dlqRouter);
 
 // Error handling middleware
-app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
-  logger.error({ err }, 'Unhandled API error');
-  res.status(500).json({ error: 'Internal Server Error' });
-});
+app.use(globalErrorHandler);
 
 if (require.main === module) {
   app.listen(config.PORT, () => {

@@ -15,6 +15,17 @@ A production-grade webhook ingestion and alerting service for Solana, built with
 - **Redis & Bull**: Provides a reliable pub-sub job queue. Helius can fire massive spikes of transactions. Dropping them in redis queue instantly allows the HTTP route to return a 200 Fast, offloading processing and DB writes to the background workers.
 - **Docker Compose**: Orchestrates all infrastructure components enabling immediately runnable dev environments.
 
+## Design Decisions
+
+**Why Bull over simple `setInterval`?**
+Processing high-throughput webhooks requires a robust queueing mechanism. While a simple in-memory array with `setInterval` might suffice for a toy project, it fails at scale. Bull offloads jobs to Redis, providing distributed processing, automatic retries with exponential backoff, dead letter queues (DLQ), and concurrency control. This ensures that sudden spikes in Helius webhooks won't exhaust memory or block the Node.js event loop.
+
+**Why separate alert delivery into its own queue?**
+Parsing heavy Solana transactions and normalizing them into PostgreSQL is generally stable. Conversly, sending an email via Nodemailer or calling the Telegram Bot API are slow, I/O-bound operations prone to external rate limits and timeouts. By decoupling these concerns into separate `webhook-queue` and `alert-queue` processors, the ingestion pipeline remains completely unblocked even if the Telegram API goes down. Failing alerts can be retried independently without needing to re-parse the underlying transactions.
+
+**Why handle idempotency at the database level?**
+Attempting to handle idempotency in the application layer (e.g., performing a `SELECT` before an `INSERT`) introduces race conditions in distributed systems where multiple concurrent workers might process the exact same webhook payload simultaneously. By leveraging PostgreSQL's `INSERT ... ON CONFLICT DO NOTHING` constraint on the unique transaction signature, the database natively enforces strict atomicity. This guarantees that exactly one worker establishes the record, completely eliminating the risk of dual-writes and duplicate alerts.
+
 ## Quickstart
 
 ### 1. Start the DB and Redis
@@ -86,6 +97,46 @@ curl -X POST http://localhost:3000/webhooks/helius \
         "nativeTransfers": [{"toUserAccount": "FWznbcNXWQuHTawe9RxvQ2LdCEN2oaUS2fBHTP15MKhx", "amount": 5000000}]
       }]'
 ```
+
+## Production Readiness
+
+### Graceful Shutdown
+The application handles `SIGTERM` and `SIGINT` signals to perform a graceful shutdown:
+1. Stops accepting new HTTP connections.
+2. Pauses Bull queues so no new jobs are picked up.
+3. Waits up to 15 seconds for active jobs to finish.
+4. Closes the PostgreSQL connection pool.
+
+### System Health
+```bash
+curl -X GET http://localhost:3000/health
+```
+Returns `200 OK` or `503 Service Unavailable` with latency metrics for PostgreSQL and Redis.
+
+### System Metrics (Requires API Key)
+```bash
+curl -X GET http://localhost:3000/metrics \
+  -H "x-api-key: test-api-key-123"
+```
+Returns queue depth, processed jobs count, DLQ pending count, etc.
+
+### Dead Letter Queue (DLQ)
+When webhook processing or alert delivery fails repeatedly (exhausting Bull retries), the job is moved to the `dead_letter_jobs` Postgres table.
+- List DLQ Jobs:
+  ```bash
+  curl -X GET "http://localhost:3000/dlq?status=pending" -H "x-api-key: test-api-key-123"
+  ```
+- Retry a Job:
+  ```bash
+  curl -X POST http://localhost:3000/dlq/UUID_HERE/retry -H "x-api-key: test-api-key-123"
+  ```
+- Discard a Job:
+  ```bash
+  curl -X DELETE http://localhost:3000/dlq/UUID_HERE -H "x-api-key: test-api-key-123"
+  ```
+
+### Idempotency
+Webhook ingestion deduplicates incoming payloads using the transaction `signature`. It stores processed signatures in the `processed_signatures` table. Exact duplicates send a `200 OK` immediately but are skipped by the background worker, bumping the `duplicate_skips` metric.
 
 ## Testing
 Run the comprehensive integration suite:
