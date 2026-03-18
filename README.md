@@ -4,6 +4,46 @@ A production-grade webhook ingestion and alerting service for Solana, built with
 
 This service operates as a high-throughput ingestion pipeline designed to reliably receive, parse, and store massive spikes of Solana blockchain transactions via Helius webhooks. By leveraging distributed Redis queues, the application fully decouples the fast, CPU-bound extraction of on-chain data into PostgreSQL from the slower, I/O-bound delivery of alerting notifications. This robust architecture enables developers to programmatically register wallet addresses and evaluate custom alert rules in real-time, instantly pushing critical on-chain events to end users via Email and Telegram without ever blocking or comprising the core ingestion event loop.
 
+## Architecture
+
+```mermaid
+graph TD
+    %% External Inputs
+    Helius(Helius RPC Webhook) -->|POST Payload| API
+    
+    subgraph "solana-webhook-processor"
+        API[Express API Server]
+        
+        %% API -> Queue
+        API -->|Enqueue Event| WQ[(Webhook Queue<br>Redis / Bull)]
+        
+        %% Worker 1
+        WQ -->|Pop Event| WP[Webhook Processor Worker]
+        
+        %% Database Interactions
+        WP <-->|Read Rules & Check Idempotency| DB[(PostgreSQL Database)]
+        WP -->|Insert Normalized Event| DB
+        
+        %% Worker 1 -> Worker 2
+        WP -->|If Rule Matches Event| AQ[(Alert Queue<br>Redis / Bull)]
+        
+        %% Worker 2
+        AQ -->|Pop Alert| AD[Alert Deliverer Worker]
+        
+        %% Dead Letter Queue
+        WP -.->|Exhausted Retries| DLQ[(DLQ Table<br>PostgreSQL)]
+        AD -.->|Exhausted Retries| DLQ
+    end
+    
+    %% External Outputs
+    AD -->|HTTP| TG(Telegram API)
+    AD -->|SMTP| Email(SMTP Provider)
+
+    %% REST Clients
+    Client(Admin/Client) -->|Manage Routes, DLQ, Metrics| API
+    API <-->|Read / Write| DB
+```
+
 ## Architecture & Technology Choices
 - **Node.js & TypeScript**: Strongly-typed business logic and configuration (`zod`).
 - **Express**: Simplest and most established Node.js HTTP framework.
